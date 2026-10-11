@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Expense Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --text:#1f2933; --muted:#6b7785; --accent:#2f6fed; --danger:#d64545; --border:#e3e7ec; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:20px 24px; background:var(--card); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+    h1 { margin:0; font-size:1.3rem; }
+    main { max-width:1000px; margin:24px auto; padding:0 16px; display:grid; gap:16px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+    .total { font-size:1.6rem; font-weight:700; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    form { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end; }
+    label { display:grid; gap:4px; font-size:.85rem; color:var(--muted); }
+    input, select, button { padding:8px 10px; border:1px solid var(--border); border-radius:6px; font:inherit; }
+    button { background:var(--accent); color:#fff; border:none; cursor:pointer; }
+    button.del { background:none; color:var(--danger); padding:2px 8px; }
+    .charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:16px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid var(--border); font-size:.92rem; }
+    td.amt { text-align:right; font-variant-numeric: tabular-nums; }
+    #error { color:var(--danger); min-height:1.2em; margin:6px 0 0; font-size:.88rem; }
+    a.export { color:var(--accent); text-decoration:none; font-size:.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Expense Tracker</h1>
+    <div><span class="muted">Total spent</span> <span class="total" id="total">0.00</span> &nbsp; <a class="export" href="/export.csv">Export CSV</a></div>
+  </header>
+
+  <main>
+    <section class="card">
+      <form id="expense-form">
+        <label>Amount <input type="number" id="amount" step="0.01" min="0.01" required></label>
+        <label>Category
+          <select id="category">
+            {% for c in categories %}<option>{{ c }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Date <input type="date" id="spent_on" required></label>
+        <label>Description <input type="text" id="description" maxlength="200"></label>
+        <button type="submit">Add expense</button>
+      </form>
+      <p id="error"></p>
+    </section>
+
+    <section class="charts">
+      <div class="card"><h3>By category</h3><canvas id="catChart"></canvas></div>
+      <div class="card"><h3>By month</h3><canvas id="monthChart"></canvas></div>
+    </section>
+
+    <section class="card">
+      <h3>Recent expenses</h3>
+      <table>
+        <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="muted" id="empty" hidden>No expenses yet. Add your first one above.</p>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let catChart, monthChart;
+
+    $("spent_on").valueAsDate = new Date();
+
+    async function api(url, options) {
+      const res = await fetch(url, options);
+      if (res.status === 204) return null;
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Request failed");
+      return body;
+    }
+
+    function drawChart(existing, canvasId, type, labels, values) {
+      if (existing) existing.destroy();
+      return new Chart($(canvasId), {
+        type,
+        data: { labels, datasets: [{ data: values, backgroundColor: ["#2f6fed","#16a085","#f39c12","#e74c3c","#8e44ad","#1abc9c","#e67e22","#7f8c8d"] }] },
+        options: { plugins: { legend: { display: type === "doughnut" } } }
+      });
+    }
+
+    async function refresh() {
+      const [expenses, summary] = await Promise.all([api("/api/expenses"), api("/api/summary")]);
+      $("total").textContent = summary.total.toFixed(2);
+
+      const tbody = $("rows");
+      tbody.replaceChildren();
+      $("empty").hidden = expenses.length > 0;
+      for (const e of expenses.slice(0, 50)) {
+        const tr = document.createElement("tr");
+        for (const text of [e.spent_on, e.category, e.description || ""]) {
+          const td = document.createElement("td");
+          td.textContent = text;
+          tr.appendChild(td);
+        }
+        const amt = document.createElement("td");
+        amt.className = "amt";
+        amt.textContent = e.amount.toFixed(2);
+        tr.appendChild(amt);
+        const action = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.className = "del";
+        btn.textContent = "Delete";
+        btn.onclick = async () => { await api("/api/expenses/" + e.id, { method: "DELETE" }); refresh(); };
+        action.appendChild(btn);
+        tr.appendChild(action);
+        tbody.appendChild(tr);
+      }
+
+      catChart = drawChart(catChart, "catChart", "doughnut",
+        summary.by_category.map(r => r.category), summary.by_category.map(r => r.total));
+      monthChart = drawChart(monthChart, "monthChart", "bar",
+        summary.by_month.map(r => r.month), summary.by_month.map(r => r.total));
+    }
+
+    $("expense-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      $("error").textContent = "";
+      try {
+        await api("/api/expenses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: $("amount").value,
+            category: $("category").value,
+            spent_on: $("spent_on").value,
+            description: $("description").value
+          })
+        });
+        $("amount").value = "";
+        $("description").value = "";
+        refresh();
+      } catch (err) {
+        $("error").textContent = err.message;
+      }
+    });
+
+    refresh();
+  </script>
+</body>
+</html>
