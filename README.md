@@ -36,6 +36,7 @@ Then open http://127.0.0.1:5000 in your browser. The database file `expenses.db`
 | GET | `/export.csv` | Download all expenses as CSV |
 
 ## Screenshot
+![Expense Tracker Dashboard](screenshot.png)
 
 Add a screenshot of your dashboard here (save it as `screenshot.png` and link it).
 
