@@ -20,7 +20,8 @@ A small full-stack web app for logging expenses and seeing where your money goes
 
 ```bash
 pip install -r requirements.txt
-python app.py
+or
+python3 app.py
 ```
 
 Then open http://127.0.0.1:5000 in your browser. The database file `expenses.db` is created automatically on first run.
